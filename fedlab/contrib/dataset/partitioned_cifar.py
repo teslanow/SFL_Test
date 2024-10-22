@@ -19,7 +19,7 @@ from torch.utils.data import DataLoader
 import torchvision
 from torchvision import transforms
 
-from .basic_dataset import FedDataset, CIFARSubset
+from .basic_dataset import FedDataset, CIFARSubset, BaseDataset
 from ...utils.dataset.partition import CIFAR10Partitioner, CIFAR100Partitioner, MNISTPartitioner
 
 
@@ -27,7 +27,7 @@ class PartitionCIFAR(FedDataset):
     """:class:`FedDataset` with partitioning preprocess. For detailed partitioning, please
     check `Federated Dataset and DataPartitioner <https://fedlab.readthedocs.io/en/master/tutorials/dataset_partition.html>`_.
 
-    
+
     Args:
         root (str): Path to download raw dataset.
         path (str): Path to save partitioned subdataset.
@@ -45,6 +45,7 @@ class PartitionCIFAR(FedDataset):
         transform (callable, optional): A function/transform that takes in an PIL image and returns a transformed version.
         target_transform (callable, optional): A function/transform that takes in the target and transforms it.
     """
+
     def __init__(self,
                  root,
                  path,
@@ -112,6 +113,11 @@ class PartitionCIFAR(FedDataset):
                                              dir_alpha=dir_alpha,
                                              verbose=verbose,
                                              seed=seed)
+            cifar_test = torchvision.datasets.CIFAR10(root=self.root,
+                                                      train=False,
+                                                      download=self.download,
+                                                      transform=self.transform)
+
         elif self.dataname == 'cifar100':
             trainset = torchvision.datasets.CIFAR100(root=self.root,
                                                      train=True,
@@ -125,6 +131,10 @@ class PartitionCIFAR(FedDataset):
                                               dir_alpha=dir_alpha,
                                               verbose=verbose,
                                               seed=seed)
+            cifar_test = torchvision.datasets.CIFAR100(root=self.root,
+                                                       train=False,
+                                                       download=self.download,
+                                                       transform=self.transform)
         else:
             raise ValueError(
                 f"'dataname'={self.dataname} currently is not supported. Only 'cifar10', and 'cifar100' are supported."
@@ -132,15 +142,23 @@ class PartitionCIFAR(FedDataset):
 
         subsets = {
             cid: CIFARSubset(trainset,
-                        partitioner.client_dict[cid],
-                        transform=self.transform,
-                        target_transform=self.targt_transform)
+                             partitioner.client_dict[cid],
+                             transform=self.transform,
+                             target_transform=self.targt_transform)
             for cid in range(self.num_clients)
         }
         for cid in subsets:
             torch.save(
                 subsets[cid],
                 os.path.join(self.path, "train", "data{}.pkl".format(cid)))
+
+        # 保存test
+        test_samples, test_labels = [], []
+        for x, y in cifar_test:
+            test_samples.append(x)
+            test_labels.append(y)
+        test_dataset = BaseDataset(test_samples, test_labels)
+        torch.save(test_dataset, os.path.join(self.path, "test", "test.pkl"))
 
     def get_dataset(self, cid, type="train"):
         """Load subdataset for client with client ID ``cid`` from local file.
@@ -152,11 +170,13 @@ class PartitionCIFAR(FedDataset):
         Returns:
             Dataset
         """
-        dataset = torch.load(
-            os.path.join(self.path, type, "data{}.pkl".format(cid)))
+        if type == 'train':
+            dataset = torch.load(os.path.join(self.path, type, "data{}.pkl".format(cid)))
+        else:
+            dataset = torch.load(os.path.join(self.path, "test", "test.pkl"))
         return dataset
 
-    def get_dataloader(self, cid, batch_size=None, type="train"):
+    def get_dataloader(self, cid=None, batch_size=None, type="train"):
         """Return dataload for client with client ID ``cid``.
 
         Args:

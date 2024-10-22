@@ -24,6 +24,7 @@ from ...core.server.handler import ServerHandler
 from ..client_sampler.base_sampler import FedSampler
 from ..client_sampler.uniform_sampler import RandomSampler
 
+from fedlab.utils.WandbWrapper import wandbLogWrap
 
 class SyncServerHandler(ServerHandler):
     """Synchronous Parameter Server Handler.
@@ -161,7 +162,11 @@ class SyncServerHandler(ServerHandler):
         self._LOGGER.info(
             f"Round [{self.round - 1}/{self.global_round}] test performance on server: \t Loss: {loss_:.5f} \t Acc: {100*acc_:.3f}%"
         )
-
+        wandbLogWrap({
+            "Round" : self.round,
+            "Loss" : loss_,
+            "Acc" : acc_,
+        })
         return loss_, acc_
 
 

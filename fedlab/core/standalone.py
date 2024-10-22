@@ -15,7 +15,6 @@
 from .client.trainer import SerialClientTrainer
 from .server.handler import ServerHandler
 
-
 class StandalonePipeline(object):
     def __init__(self, handler: ServerHandler, trainer: SerialClientTrainer):
         """Perform standalone simulation process.
