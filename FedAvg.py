@@ -13,11 +13,11 @@ wandbInit(args)
 model = create_model_full(args.model_type, (100, args.pretrained))
 # server
 handler = SyncServerHandler(
-    model=model, global_round=args.round, num_clients=args.total_clients, sample_ratio=args.sample_ratio
+    model=model, global_round=args.round, num_clients=args.total_clients, sample_ratio=args.sample_ratio, device=args.device, cuda=True
 )
 
 # client
-trainer = SGDSerialClientTrainer(model, args.total_clients, cuda=True)
+trainer = SGDSerialClientTrainer(model, args.total_clients, cuda=True, device=args.device)
 transf = load_default_transform(args.dataset_type)
 dataset = PartitionCIFAR(
     root=args.data_path,
@@ -27,9 +27,10 @@ dataset = PartitionCIFAR(
     partition='dirichlet',
     dir_alpha=0.5,
     seed=1234,
-    transform=transf
+    transform=transf,
+    preprocess=False
 )
-dataset.preprocess()
+# dataset.preprocess()
 
 trainer.setup_dataset(dataset)
 trainer.setup_optim(args.local_epoch, args.batch_size, args.lr)

@@ -1,4 +1,5 @@
 # Copyright 2021 Peng Cheng Laboratory (http://www.szpclab.com/) and FedLab Authors (smilelab.group)
+import copy
 
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -19,7 +20,7 @@ from copy import deepcopy
 
 from typing import List
 from ...utils import Logger, Aggregators, SerializationTool
-from ...utils.functional import evaluate
+from ...utils.functional import evaluate, evaluate_split
 from ...core.server.handler import ServerHandler
 from ..client_sampler.base_sampler import FedSampler
 from ..client_sampler.uniform_sampler import RandomSampler
@@ -57,6 +58,7 @@ class SyncServerHandler(ServerHandler):
         device: str = None,
         sampler: FedSampler = None,
         logger: Logger = None,
+        bottom_model: torch.nn.Module = None,
     ):
         super(SyncServerHandler, self).__init__(model, cuda, device)
 
@@ -78,10 +80,25 @@ class SyncServerHandler(ServerHandler):
         self.global_round = global_round
         self.round = 0
 
+        # 用作progressive tensor freezing
+        self.last_state_dict = None
+
+        if bottom_model is not None:
+            if cuda:
+                self._bottom_model = deepcopy(bottom_model).cuda(device)
+            else:
+                self._bottom_model = deepcopy(bottom_model).cpu()
+        else:
+            self._bottom_model = None
     @property
     def downlink_package(self) -> List[torch.Tensor]:
         """Property for manager layer. Server manager will call this property when activates clients."""
         return [self.model_parameters]
+
+    @property
+    def downlink_package_2(self) -> List[torch.Tensor]:
+        """Property for manager layer. Server manager will call this property when activates clients."""
+        return [SerializationTool.serialize_model(self._bottom_model), self.model_parameters]
 
     @property
     def num_clients_per_round(self):
@@ -124,6 +141,14 @@ class SyncServerHandler(ServerHandler):
         serialized_parameters = Aggregators.fedavg_aggregate(parameters_list)
         SerializationTool.deserialize_model(self._model, serialized_parameters)
 
+    def global_update_2(self, buffer):
+        bottom_parameters_list = [ele[0] for ele in buffer]
+        top_parameters_list = [ele[1] for ele in buffer]
+        serialized_bottom_parameters = Aggregators.fedavg_aggregate(bottom_parameters_list)
+        serialized_top_parameters = Aggregators.fedavg_aggregate(top_parameters_list)
+        SerializationTool.deserialize_model(self._model, serialized_top_parameters)
+        SerializationTool.deserialize_model(self._bottom_model, serialized_bottom_parameters)
+
     def load(self, payload: List[torch.Tensor]) -> bool:
         """Update global model with collected parameters from clients.
 
@@ -152,6 +177,31 @@ class SyncServerHandler(ServerHandler):
         else:
             return False
 
+    def load2(self, payload: List[torch.Tensor]) -> bool:
+        """
+        专门用于split federated learning
+        Args:
+            payload:
+
+        Returns:
+
+        """
+        assert len(payload) > 0
+        self.client_buffer_cache.append(deepcopy(payload))
+
+        assert len(self.client_buffer_cache) <= self.num_clients_per_round
+
+        if len(self.client_buffer_cache) == self.num_clients_per_round:
+            self.global_update_2(self.client_buffer_cache)
+            self.round += 1
+
+            # reset cache
+            self.client_buffer_cache = []
+
+            return True  # return True to end this round.
+        else:
+            return False
+
     def setup_dataset(self, dataset) -> None:
         self.dataset = dataset
 
@@ -169,6 +219,20 @@ class SyncServerHandler(ServerHandler):
         })
         return loss_, acc_
 
+    def evaluate_split(self):
+        self._bottom_model.eval()
+        self._model.eval()
+        test_loader = self.dataset.get_dataloader(type="test", batch_size=128)
+        loss_, acc_ = evaluate_split(self._bottom_model, self._model, test_loader, self.device, nn.CrossEntropyLoss())
+        self._LOGGER.info(
+            f"Round [{self.round - 1}/{self.global_round}] test performance on server: \t Loss: {loss_:.5f} \t Acc: {100 * acc_:.3f}%"
+        )
+        wandbLogWrap({
+            "Round": self.round,
+            "Loss": loss_,
+            "Acc": acc_,
+        })
+        return loss_, acc_
 
 class AsyncServerHandler(ServerHandler):
     """Asynchronous Parameter Server Handler

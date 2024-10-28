@@ -59,7 +59,7 @@ def create_model_instance_SL(model_type, create_args:dict):
     Returns:
         bottom_model, top_model
     """
-    if model_type == 'Resnet34':
+    if model_type == 'resnet34':
         split_point, class_num, pretrained = create_args['split_point'], create_args['class_num'], create_args['pretrained']
         model = resnet34(pretrained=pretrained)
         bottom_model, top_model = create_SL_resnet(model, split_point, class_num)

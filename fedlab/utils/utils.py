@@ -42,7 +42,24 @@ def parse_args():
     parser.add_argument('--finish_ratio', type=float, default=1.0)
     parser.add_argument('--device', type=str, default='cuda:0')
     parser.add_argument('--pretrained', action='store_true', default=False, help='提供该参数，则表示开启预训练')
+    # freeze方法
+    parser.add_argument('--update_method', type=str, choices=['static', 'pd_sc', 'random_sync'])
+    # 如果是static
+    parser.add_argument('--num_bk', type=int, help='how many blocks to update')
+    # 如果是pd_sc, progressive decreasing, same for all clients, see paper: AutoFreeze: Automatically Freezing Model Blocks to Accelerate Fine-tuning
+    parser.add_argument('--percentile', type=int, default=50, help='free the first tensor whose gradients rate of change is less that the percentile of all')
+    parser.add_argument('--pd_sc_step', type=int, help='how many step to make decision')
 
+    parser.add_argument('--class_num', type=int, default=100, required=True)
+
+    # 以下是压缩的参数情况
+    # 从哪里开始划分
+    parser.add_argument('--split_point', type=int)
+    parser.add_argument('--compress_method', type=str)
+    # 如果使用quantizer
+    parser.add_argument('--bits', type=int, default=32)
+    # 如果使用top-k
+    parser.add_argument('--k_ratio', type=float, default=1.0)
     return parser.parse_args()
 
 def get_client_logger(args, rank):

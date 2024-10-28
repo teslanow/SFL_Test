@@ -149,3 +149,5 @@ class SerialClientTrainer(SerialModelMaintainer):
     def validate(self):
         """Validate quality of local model."""
         raise NotImplementedError()
+
+

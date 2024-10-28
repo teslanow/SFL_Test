@@ -75,6 +75,26 @@ def evaluate(model, criterion, test_loader):
 
     return loss_.avg, acc_.avg
 
+def evaluate_split(bottom_model, top_model, test_loader, device, criterion):
+    loss_ = AverageMeter()
+    acc_ = AverageMeter()
+    with torch.no_grad():
+        bottom_model.eval()
+        top_model.eval()
+        for inputs, labels in test_loader:
+            batch_size = len(labels)
+            inputs = inputs.to(device)
+            labels = labels.to(device)
+
+            output1 = bottom_model(inputs)
+            outputs = top_model(output1)
+            loss = criterion(outputs, labels)
+
+            _, predicted = torch.max(outputs, 1)
+            loss_.update(loss.item(), batch_size)
+            acc_.update(torch.sum(predicted.eq(labels)).item() / batch_size, batch_size)
+
+    return loss_.avg, acc_.avg
 
 def read_config_from_json(json_file: str, user_name: str):
     """Read config from `json_file` to get config for `user_name`
