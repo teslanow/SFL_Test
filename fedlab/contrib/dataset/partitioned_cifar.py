@@ -186,5 +186,5 @@ class PartitionCIFAR(FedDataset):
         """
         dataset = self.get_dataset(cid, type)
         batch_size = len(dataset) if batch_size is None else batch_size
-        data_loader = DataLoader(dataset, batch_size=batch_size)
+        data_loader = DataLoader(dataset, batch_size=batch_size, num_workers=4)
         return data_loader

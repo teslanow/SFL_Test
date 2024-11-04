@@ -29,7 +29,7 @@ def wandb_config(args):
 set_seed()
 args = parse_args()
 config = wandb_config(args)
-wandbInit(args, "Freeze", config)
+wandbInit(args, "Freeze-dirichilet", config)
 model = create_model_full(args.model_type, (100, args.pretrained))
 # server
 handler = SyncServerHandler(

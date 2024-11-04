@@ -28,7 +28,7 @@ def wandb_config(args):
 set_seed()
 args = parse_args()
 config = wandb_config(args)
-wandbInit(args, "FedAvg_Compress", config)
+wandbInit(args, "FedAvg_Compress_2", config)
 bottom_model, top_model = create_model_instance_SL(args.model_type, {
     "split_point" : args.split_point,
     "class_num" : args.class_num,

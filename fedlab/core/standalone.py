@@ -1,5 +1,7 @@
 # Copyright 2021 Peng Cheng Laboratory (http://www.szpclab.com/) and FedLab Authors (smilelab.group)
 import copy
+import os
+import pickle
 import random
 
 import numpy as np
@@ -36,10 +38,12 @@ class StandalonePipeline(object):
         # initialization
         self.handler.num_clients = self.trainer.num_clients
 
-    def main(self):
+    def main(self, save=False):
+        all_sample_clients = []
         while self.handler.if_stop is False:
             # server side
             sampled_clients = self.handler.sample_clients()
+            all_sample_clients.append(sampled_clients)
             broadcast = self.handler.downlink_package
 
             # client side
@@ -53,9 +57,20 @@ class StandalonePipeline(object):
             # evaluate
             self.evaluate()
             # self.handler.evaluate()
-
+            # 保存模型
+            if save and self.handler.round % 1 == 0:
+                path = "results/tmp_models/fedavg_pretrain/"
+                if not os.path.exists(path):
+                    os.makedirs(path)
+                torch.save(self.handler.model.state_dict(), os.path.join(path, f"{self.handler.round * self.trainer.epochs}.pt"))
+            # 更新lr
+            self.trainer.scheduler.step()
+            print(self.trainer.optimizer.param_groups[0]['lr'])
+        with open('results/all_sample_clients_fedavg.pkl', 'wb') as file:
+            pickle.dump(all_sample_clients, file)
     def evaluate(self):
         loss_, acc_ = self.handler.evaluate()
+
 
 
 def static_decision_to_update(num, model: torch.nn.Module):
@@ -151,7 +166,7 @@ class StandalonePipelineWithFreeze(object):
                 # client side
                 self.trainer.local_process_with_freeze(broadcast, sampled_clients, name_list_to_update)
             elif freeze_method == 'random_sync':
-                print(update_name_list_list)
+                # print(update_name_list_list)
                 self.trainer.local_process_with_freeze_2(broadcast, sampled_clients, update_name_list_list)
             self.trainer.scheduler.step()
             print("cur learning rate: ", self.trainer.scheduler.get_last_lr()[0])

@@ -1,176 +1,145 @@
+# 测试数据是不是真的non-iid
 import argparse
 import copy
-
+import os
+import pickle
+from collections import OrderedDict
 import torch
-import torchvision
+from torchvision import datasets
 from tqdm import tqdm
 
-from fedlab.contrib.dataset.partitioned_cifar import PartitionCIFAR
-from fedlab.utils.WandbWrapper import *
-from fedlab.models.CommModels import create_model_full, create_model_instance_SL
-from fedlab.utils.functional import AverageMeter, evaluate
-from fedlab.utils.utils import load_default_transform, set_seed, prRed, prGreen
+from fedlab.models.CommModels import create_model_full
+from fedlab.utils.utils import set_seed, load_default_transform
 from torch.utils.data import DataLoader
 
+
+
 def parse_args():
-    parser = argparse.ArgumentParser(description='To explore which compression methods works')
-    parser.add_argument('--dataset_type', type=str, default='cifar100')
-    parser.add_argument('--class_num', type=int, required=True)
+    # init parameters
+    parser = argparse.ArgumentParser(description='Distributed Client')
+    parser.add_argument('--dataset_type', type=str, default='cifar10')
     parser.add_argument('--model_type', type=str, default='Resnet34')
-    # 现在实验已经把cifar100按照alpha=0.5划分为50份，id从0到49使用相应的client数据，id=50使用total数据
-    parser.add_argument('--data_id', type=int, required=True)
-    parser.add_argument('--batch_size', type=int, default=64)
-    parser.add_argument('--lr', type=float, default=0.02)
-    parser.add_argument('--round', type=int, default=250, help='how many round to train')
-    parser.add_argument('--local_epoch', type=int, default=1, help='local iteration')
+    parser.add_argument('--client_batch_size', type=int, required=True)
+    parser.add_argument('--round', type=int, default=250, help='communication round')
     parser.add_argument('--data_path', type=str, required=True)
-    parser.add_argument('--use_cuda', action="store_false", default=True)
-    parser.add_argument('--pretrained', action='store_true', default=False, help='提供该参数，则表示开启预训练')
-    parser.add_argument('--device', type=str, default='cuda:0')
-    # 从哪里开始划分
-    parser.add_argument('--split_point', type=int, required=True)
-    parser.add_argument('--compress_method', type=str)
-    # 如果使用quantizer
-    parser.add_argument('--bits', type=int, default=32)
-    # 如果使用top-k
-    parser.add_argument('--k_ratio', type=float, default=1.0)
-    # 如果使用frequency
-    parser.add_argument('--L_ratio', type=float, default=1.0, help='ratio of Low frequency part')
+    parser.add_argument('--client_data_path', type=str, required=True)
+    parser.add_argument('--class_num', type=int, default=10, required=True)
+    parser.add_argument('--models_path', type=str, help='需要先通过FL算法得到每一round的model，放到models_path文件夹下', required=True)
+    parser.add_argument('--path_sample_clients', type=str, required=True)
     return parser.parse_args()
 
-def wandb_config(args):
-    return {
-        "lr": args.lr,
-        "architecture": args.model_type,
-        "batch_size": args.batch_size,
-        "local_epoch": args.local_epoch,
-        "compress_method": args.compress_method,
-        "dataset": args.dataset_type,
-        "round": args.round,
-        "pretrained": args.pretrained,
-        "bits": args.bits,
-        "k_ratio": args.k_ratio,
-        "L_ratio": args.L_ratio,
-    }
+def statistical_gradient(model: torch.nn.Module, data_loader, optimizer, device, criterion):
+    all_grads = OrderedDict()
+    model.train()
+    model.to(device)
+    # for data, target in tqdm(data_loader):
+    total_sample_num = 0
+    for data, target in data_loader:
+        data, target = data.to(device), target.to(device)
+        sample_num = data.size(0)
+        total_sample_num += sample_num
+        optimizer.zero_grad()
+        output = model(data)
+        loss = criterion(output, target)
+        loss.backward()
+        for name, param in model.named_parameters():
+            if param.grad is not None:
+                if name not in all_grads:
+                    all_grads[name] = []
+                all_grads[name].append(param.grad.clone().detach().view(-1) * sample_num)
+        del output
+        torch.cuda.empty_cache()
+        break
+    avg_grads = {}
+    for name, grads in all_grads.items():
+        avg_grads[name] = torch.stack(grads).sum(dim=0) / total_sample_num
+    all_grads.clear()
+    return avg_grads
 
-def evaluate_1(bottom_model, top_model, test_loader, device, criterion):
-    loss_ = AverageMeter()
-    acc_ = AverageMeter()
-    with torch.no_grad():
-        bottom_model.eval()
-        top_model.eval()
-        for inputs, labels in test_loader:
-            batch_size = len(labels)
-            inputs = inputs.to(device)
-            labels = labels.to(device)
+def sample_gradient(model: torch.nn.Module, data, target, optimizer, device, criterion):
+    all_grads = OrderedDict()
+    model.train()
+    model.to(device)
+    data, target = data.to(device), target.to(device)
+    optimizer.zero_grad()
+    output = model(data)
+    loss = criterion(output, target)
+    loss.backward()
+    for name, param in model.named_parameters():
+        if param.grad is not None:
+            if name not in all_grads:
+                all_grads[name] = None
+            all_grads[name] = param.grad.clone().detach().view(-1)
+    del output
+    torch.cuda.empty_cache()
+    return all_grads
 
-            output1 = bottom_model(inputs)
-            outputs = top_model(output1)
-            loss = criterion(outputs, labels)
+def calculate_norm(tensor, p):
+    return tensor.norm(p).item()
 
-            _, predicted = torch.max(outputs, 1)
-            loss_.update(loss.item(), batch_size)
-            acc_.update(torch.sum(predicted.eq(labels)).item() / batch_size, batch_size)
+def load_train_dataset_from_clients(client_id, path):
+    return torch.load(os.path.join(path, 'fedlab', 'train', "data{}.pkl".format(client_id)))
 
-    return loss_.avg, acc_.avg
-
-def compress_activation(x, compress_method:str, k_ratio=1.0):
-    """
-    对x进行压缩，x需要被detach过
-    Args:
-        x: activation
-        compress_method: normal，等
-
-    Returns:
-
-    """
-    with torch.no_grad():
-        if compress_method == "normal":
-            return x
-        elif compress_method == "topk":
-            pass
-        else:
-            raise NotImplementedError
+def load_train_dataset_from_clients_total(client_ids, path):
+    all_dataset = []
+    for client_id in client_ids:
+        dataset = torch.load(os.path.join(path, 'fedlab', 'train', "data{}.pkl".format(client_id)))
+        all_dataset.append(dataset)
+    return torch.utils.data.ConcatDataset(all_dataset)
 
 def main():
     set_seed()
     args = parse_args()
-    config = wandb_config(args)
-    # wandbInit(args, "CompressCT", config)
-    bottom_model, top_model = create_model_instance_SL(args.model_type, {
-        "split_point" : args.split_point,
-        "class_num" : args.class_num,
-        "pretrained" : args.pretrained,
-    })
-
-    test_model = torchvision.models.resnet34(pretrained= args.pretrained)
-    test_model.fc = torch.nn.Linear(test_model.fc.in_features, args.class_num)
-    optimizer = torch.optim.SGD(test_model.parameters(), lr=args.lr)
-
-
+    model = create_model_full(args.model_type, (args.class_num, True))
+    optim= torch.optim.SGD(model.parameters(), lr=0.001)
     transf = load_default_transform(args.dataset_type)
-    bottom_optimizer = torch.optim.SGD(bottom_model.parameters(), args.lr)
-    top_optimizer = torch.optim.SGD(top_model.parameters(), args.lr)
-    bottom_scheduler = torch.optim.lr_scheduler.StepLR(bottom_optimizer, step_size=5, gamma=0.9)
-    top_scheduler = torch.optim.lr_scheduler.StepLR(top_optimizer, step_size=5, gamma=0.9)
-    criterion = torch.nn.CrossEntropyLoss()
-    # 加载数据
-    # dataset = PartitionCIFAR(
-    #     root=args.data_path,
-    #     path=os.path.join(args.data_path, "fedlab"),
-    #     dataname=args.dataset_type,
-    #     num_clients=args.total_clients,
-    #     partition='dirichlet',
-    #     dir_alpha=0.5,
-    #     seed=1234,
-    #     transform=transf,
-    #     preprocess=False
-    # )
-    # if args.data_id < 50:
-    #     train_data_loader = dataset.get_dataloader(args.data_id, args.batch_size)
-    # else:
-    train_dataset = torchvision.datasets.CIFAR100(root=args.data_path, train=True, download=True, transform=transf)
-    train_data_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
-    test_dataset = torchvision.datasets.CIFAR100(root=args.data_path, train=False, download=True, transform=transf)
-    test_data_loader = DataLoader(test_dataset, batch_size=256, shuffle=True)
+    # overall_dataset = datasets.CIFAR10(args.data_path, train=True, download=True, transform=transf)
+    # overall_loader = DataLoader(overall_dataset, batch_size=256, shuffle=True)
+    overall_dataset = load_train_dataset_from_clients_total(range(100), args.data_path)
+    overall_loader = DataLoader(overall_dataset, batch_size=args.client_batch_size, shuffle=True)
+    # 开始训练
+    device = "cuda:0"
+    # 加载fl的client序列
+    with open(args.path_sample_clients, 'rb') as f:
+        all_sample_clients = pickle.load(f)
+        print(all_sample_clients)
+    cri = torch.nn.CrossEntropyLoss()
+    for idx, cur_round in enumerate(range(1, 51, 5)):
+        round_path = f'/data/zhongxiangwei/tmp/SFL_Test2/test2/{cur_round}'
+        # round_path = f'/data/zhongxiangwei/tmp/SFL_Test2/tmp_models_random_initial/tmp_models/norm/{cur_round}'
+        if not os.path.exists(round_path):
+            os.makedirs(round_path)
+        model_st = torch.load(os.path.join(args.models_path, str(cur_round) + '.pt'))
+        model.load_state_dict(model_st)
+        print("train on total dataset")
+        avg_grads = statistical_gradient(model, overall_loader, optim, device, criterion=cri)
+        with open(os.path.join(round_path, 'all.pkl'), 'wb') as f:
+            pickle.dump(avg_grads, f)
+        del avg_grads
+        # sample_clients = all_sample_clients[cur_round - 1]
+        sample_clients = all_sample_clients[cur_round]
+        for client_id in sample_clients:
+            print("train on {client_id}".format(client_id=client_id))
+            client_dataset = load_train_dataset_from_clients(client_id, args.client_data_path)
+            # client_loader = DataLoader(client_dataset, batch_size=args.client_batch_size, shuffle=True)
+            client_loader = DataLoader(client_dataset, batch_size=256, shuffle=True)
+            # for data, target in client_loader:
+            #     per_sample_grad = sample_gradient(model, data, target, optim, device, criterion=cri)
+            #     # 计算norm
+            #     total_norm = 0.0
+            #     for name, param in per_sample_grad.items():
+            #         total_norm += (param.norm(2) ** 2).item()
+            #     print(f"local gradient 2-norm: {total_norm}")
+            #     total_dots = 0.0
+            #     for name, param in per_sample_grad.items():
+            #         if name in avg_grads:
+            #             total_dots += torch.dot(param, avg_grads[name]).item()
+            #     print(f"norm: {total_norm}, dot: {total_dots}")
+            avg_grads = statistical_gradient(model, client_loader, optim, 'cuda:1', cri)
+            with open(os.path.join(round_path, f'{client_id}.pkl'), 'wb') as f:
+                pickle.dump(avg_grads, f)
+            del avg_grads
+        # break
 
-    for cur_round in range(args.round):
-        for cur_epoch in range(args.local_epoch):
-            test_model.train()
-            test_model.to(args.device)
-            # bottom_model.train()
-            # top_model.train()
-            # bottom_model.to(args.device)
-            # top_model.to(args.device)
-            for batch_idx, (data, target) in enumerate(tqdm(train_data_loader, desc='Training')):
-                data = data.to(args.device)
-                target = target.to(args.device)
-                output = test_model(data)
-                loss = criterion(output, target)
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
-            loss, acc = evaluate(test_model, criterion, test_data_loader)
-                # output = bottom_model(data)
-                # smashed_data = output.clone().detach()
-                # # 压缩
-                # # new_x = compress_activation(output, args.compress_method)
-                # smashed_data.requires_grad = True
-                # output1 = top_model(smashed_data)
-                # loss = criterion(output1, target)
-                # top_optimizer.zero_grad()
-                # loss.backward()
-                # top_optimizer.step()
-                # # bottom_model的后向
-                # grad_smashed_data = smashed_data.grad.clone().detach()
-                # bottom_optimizer.zero_grad()
-                # output.backward(grad_smashed_data)
-                # bottom_optimizer.step()
-            # bottom_scheduler.step()
-            # top_scheduler.step()
-            # loss, acc = evaluate(bottom_model, top_model, test_data_loader, args.device, criterion)
-            prRed(f"loss : {loss}, acc : {acc}")
-    wandbFinishWrap()
-
-main()
-
+if __name__ == '__main__':
+    main()

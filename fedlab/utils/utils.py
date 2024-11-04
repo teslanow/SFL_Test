@@ -10,6 +10,7 @@ import numpy as np
 import torch
 import wandb
 import yaml
+from fsspec.registry import default
 from torch.utils.tensorboard import SummaryWriter
 from typing import List
 # from Common.ClientProperties import ClientPropertyManager
@@ -29,6 +30,8 @@ def parse_args():
     parser.add_argument('--lr', type=float, default=0.1)
     parser.add_argument('--decay_rate', type=float, default=0.993)
     parser.add_argument('--min_lr', type=float, default=0.005)
+    parser.add_argument('--step_size', type=int, default=10)
+    parser.add_argument('--gamma', type=float, default=0.98)
     parser.add_argument('--round', type=int, default=250, help='communication round')
     parser.add_argument('--local_epoch', type=int, default=1, help='local iteration')
     parser.add_argument('--momentum', type=float, default=-1)
@@ -49,7 +52,7 @@ def parse_args():
     # 如果是pd_sc, progressive decreasing, same for all clients, see paper: AutoFreeze: Automatically Freezing Model Blocks to Accelerate Fine-tuning
     parser.add_argument('--percentile', type=int, default=50, help='free the first tensor whose gradients rate of change is less that the percentile of all')
     parser.add_argument('--pd_sc_step', type=int, help='how many step to make decision')
-
+    parser.add_argument('--initial_model_path', type=str, default='')
     parser.add_argument('--class_num', type=int, default=100, required=True)
 
     # 以下是压缩的参数情况

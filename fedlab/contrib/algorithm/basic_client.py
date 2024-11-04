@@ -131,7 +131,7 @@ class SGDSerialClientTrainer(SerialClientTrainer):
     def setup_dataset(self, dataset):
         self.dataset = dataset
 
-    def setup_optim(self, epochs, batch_size, lr):
+    def setup_optim(self, epochs, batch_size, lr, step_size, gamma):
         """Set up local optimization configuration.
 
         Args:
@@ -147,7 +147,7 @@ class SGDSerialClientTrainer(SerialClientTrainer):
             self.server_optimizer = torch.optim.SGD(self._server_model.parameters(), lr)
             self.server_scheduler = torch.optim.lr_scheduler.StepLR(self.server_optimizer, step_size=5, gamma=0.9)
         self.criterion = torch.nn.CrossEntropyLoss()
-        self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=5, gamma=0.9)
+        self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=step_size, gamma=gamma)
 
     @property
     def uplink_package(self):
@@ -185,7 +185,7 @@ class SGDSerialClientTrainer(SerialClientTrainer):
         for id in (progress_bar := tqdm(id_list)):
             progress_bar.set_description(f"Training on client {id}", refresh=True)
             data_loader = self.dataset.get_dataloader(id, self.batch_size)
-            print(f"dataset len : {len(data_loader.dataset)}")
+            # print(f"dataset len : {len(data_loader.dataset)}")
             pack, bytes_communication = self.train_with_compression(bottom_model_parameters, top_model_parameters, data_loader, compression_args)
             self.cache.append(pack)
             total_bytes_communication += bytes_communication
