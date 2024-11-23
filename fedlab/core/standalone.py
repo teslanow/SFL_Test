@@ -533,6 +533,8 @@ class StandalonePipelineWithFreeze(object):
                 model = self.handler.model
                 optim = torch.optim.SGD(model.parameters(), lr=0.001)
                 avg_grads = statistical_gradient(model, overall_loader, optim, device, criterion=cri)
+                with open('/home/zhongxiangwei/search_projects/SFL_Test2/results/tmp_models2/fedavg_pretrain/all.pkl', 'wb') as f:
+                    pickle.dump(avg_grads, f)
                 statistical_gradients = []
                 for parameter_name in all_parameter_names:
                     assert parameter_name in avg_grads
@@ -543,11 +545,14 @@ class StandalonePipelineWithFreeze(object):
                     client_dataset = load_train_dataset_from_clients(client_id, "/data/zhongxiangwei/data/CIFAR10")
                     client_loader = DataLoader(client_dataset, batch_size=256, shuffle=True)
                     this_gradient = statistical_gradient(model, client_loader, optim, device, cri)
+                    with open(f'/home/zhongxiangwei/search_projects/SFL_Test2/results/tmp_models2/fedavg_pretrain/client-{client_id}.pkl','wb') as f:
+                        pickle.dump(this_gradient, f)
                     grads = []
                     for parameter_name in all_parameter_names:
                         assert parameter_name in this_gradient
                         grads.append(this_gradient[parameter_name])
                     all_gradients.append(grads)
+                exit(-1)
                 normal_times = [2 * forward_model_density / s for s in run_speeds]
                 largest_time = max(normal_times)
                 time_limit = np.array([largest_time * 0.5 for _ in range(num_clients)])
