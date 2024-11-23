@@ -3,12 +3,13 @@ import argparse
 import copy
 import os
 import pickle
+import random
 from collections import OrderedDict
 import torch
 from torchvision import datasets
 from tqdm import tqdm
-
-from fedlab.models.CommModels import create_model_full
+from ptflops import get_model_complexity_info
+from fedlab.models.CommModels import create_model_full, model_density_per_layer
 from fedlab.utils.utils import set_seed, load_default_transform
 from torch.utils.data import DataLoader
 
@@ -141,5 +142,41 @@ def main():
             del avg_grads
         # break
 
+def main2():
+    set_seed()
+    args = parse_args()
+    model = create_model_full(args.model_type, (args.class_num, True))
+    optim= torch.optim.SGD(model.parameters(), lr=0.001)
+    overall_dataset = load_train_dataset_from_clients_total(range(100), args.data_path)
+    overall_loader = DataLoader(overall_dataset, batch_size=256, shuffle=True)
+    # 开始训练
+    device = "cuda:0"
+    # 加载fl的client序列
+    cri = torch.nn.CrossEntropyLoss()
+    model_st = torch.load("results/tmp_models/fedavg_pretrain/1.pt")
+    model.load_state_dict(model_st)
+    print("train on total dataset")
+    avg_grads = statistical_gradient(model, overall_loader, optim, device, criterion=cri)
+    with open(os.path.join("results/tmp_models/fedavg_pretrain/", 'all.pkl'), 'wb') as f:
+        pickle.dump(avg_grads, f)
+    del avg_grads
+    sample_clients = random.sample(range(100), 10)
+    for client_id in sample_clients:
+        print("train on {client_id}".format(client_id=client_id))
+        client_dataset = load_train_dataset_from_clients(client_id, args.client_data_path)
+        client_loader = DataLoader(client_dataset, batch_size=256, shuffle=True)
+        avg_grads = statistical_gradient(model, client_loader, optim, device, cri)
+        with open(os.path.join("results/tmp_models/fedavg_pretrain/", f'client-{client_id}.pkl'), 'wb') as f:
+            pickle.dump(avg_grads, f)
+        del avg_grads
+        # break
+
+def main3():
+    set_seed()
+    args = parse_args()
+    model = create_model_full(args.model_type, (args.class_num, True))
+    macs, params = get_model_complexity_info(model, (3, 224, 224), as_strings=False, backend='pytorch',print_per_layer_stat=True, verbose=True)
+    print(macs)
+
 if __name__ == '__main__':
-    main()
+    main3()

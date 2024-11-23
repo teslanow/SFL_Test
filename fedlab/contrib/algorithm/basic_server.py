@@ -26,6 +26,7 @@ from ..client_sampler.base_sampler import FedSampler
 from ..client_sampler.uniform_sampler import RandomSampler
 
 from fedlab.utils.WandbWrapper import wandbLogWrap
+from fedlab.utils.simulate_time import get_cur_time
 
 class SyncServerHandler(ServerHandler):
     """Synchronous Parameter Server Handler.
@@ -216,6 +217,7 @@ class SyncServerHandler(ServerHandler):
             "Round" : self.round,
             "Loss" : loss_,
             "Acc" : acc_,
+            "Time" : get_cur_time()
         })
         return loss_, acc_
 

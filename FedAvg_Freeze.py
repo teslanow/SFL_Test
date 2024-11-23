@@ -1,3 +1,4 @@
+import copy
 import os.path
 import random
 
@@ -5,11 +6,11 @@ from fedlab.contrib.algorithm.basic_server import SyncServerHandler
 from fedlab.contrib.algorithm.basic_client import SGDSerialClientTrainer
 from fedlab.core.standalone import StandalonePipelineWithFreeze
 from fedlab.contrib.dataset.partitioned_cifar import PartitionCIFAR
-from fedlab.models.CommModels import create_model_full
-from fedlab.utils.utils import set_seed, parse_args, load_default_transform
+from fedlab.models.CommModels import create_model_full, model_density_per_layer
+from fedlab.utils.System_conf import set_cur_system_hetero
+from fedlab.utils.utils import set_seed, parse_args, load_default_transform, load_input_tensor_type
 from fedlab.utils.WandbWrapper import wandbInit, wandbFinishWrap
-
-
+import fedlab.utils.simulate_time
 def wandb_config(args):
     return {
         "lr": args.lr,
@@ -29,8 +30,9 @@ def wandb_config(args):
 set_seed()
 args = parse_args()
 config = wandb_config(args)
-wandbInit(args, "Freeze-dirichilet", config)
-model = create_model_full(args.model_type, (100, args.pretrained))
+set_cur_system_hetero(args.system_hetero)
+# wandbInit(args, "Freeze-3", config)
+model = create_model_full(args.model_type, (args.class_num, args.pretrained))
 # server
 handler = SyncServerHandler(
     model=model, global_round=args.round, num_clients=args.total_clients, sample_ratio=args.sample_ratio, cuda=True, device=args.device
@@ -54,12 +56,13 @@ dataset = PartitionCIFAR(
 # dataset.preprocess()
 
 trainer.setup_dataset(dataset)
-trainer.setup_optim(args.local_epoch, args.batch_size, args.lr)
+trainer.setup_optim(args.local_epoch, args.batch_size, args.lr, args.step_size, args.gamma)
 
 handler.num_clients = args.total_clients
 handler.setup_dataset(dataset)
 # main
 pipeline = StandalonePipelineWithFreeze(handler, trainer)
+pipeline.set_clients_properties('ExpConfig/vehicle_device_capacity', args.total_clients)
 # 设置freeze args
 if args.update_method == 'static':
     freeze_args = args.num_bk
@@ -72,5 +75,12 @@ elif args.update_method == 'random_sync':
     model = trainer.model
     num_freezable = len(list(model.parameters()))
     freeze_args = num_freezable
-pipeline.main(freeze_args, freeze_method=args.update_method)
+elif args.update_method == 'selective':
+    freeze_args = None
+else:
+    raise NotImplementedError
+# 获取model的density
+# input_tensor_shape = load_input_tensor_type(args.dataset_type)
+macs, params = model_density_per_layer(copy.deepcopy(model), (3, 224, 224))
+pipeline.main(freeze_args, freeze_method=args.update_method, forward_model_density=macs)
 wandbFinishWrap()

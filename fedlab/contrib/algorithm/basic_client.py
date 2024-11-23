@@ -156,13 +156,20 @@ class SGDSerialClientTrainer(SerialClientTrainer):
         return package
 
     def local_process(self, payload, id_list):
+        """
+        Returns: all_client_samples，表示每个client最终运行的samples的数目
+        """
         model_parameters = payload[0]
+        all_client_samples = {}
         for id in (progress_bar := tqdm(id_list)):
             progress_bar.set_description(f"Training on client {id}", refresh=True)
             data_loader = self.dataset.get_dataloader(id, self.batch_size)
-
+            all_client_samples[id] = len(data_loader.dataset) * self.epochs
             pack = self.train(model_parameters, data_loader)
             self.cache.append(pack)
+        return all_client_samples
+
+
 
     def local_process_with_freeze(self, payload, id_list, update_name_list):
         """
@@ -173,11 +180,14 @@ class SGDSerialClientTrainer(SerialClientTrainer):
             update_name_list: 一个list，list的每个element表示允许更新的tensor name
         """
         model_parameters = payload[0]
+        all_client_samples = {}
         for id in (progress_bar := tqdm(id_list)):
             progress_bar.set_description(f"Training on client {id}", refresh=True)
             data_loader = self.dataset.get_dataloader(id, self.batch_size)
+            all_client_samples[id] = len(data_loader.dataset) * self.epochs
             pack = self.train_with_freeze(model_parameters, data_loader, update_name_list)
             self.cache.append(pack)
+        return all_client_samples
 
     def local_process_with_compression(self, payload, id_list, compression_args):
         bottom_model_parameters, top_model_parameters = payload[0], payload[1]
@@ -190,6 +200,7 @@ class SGDSerialClientTrainer(SerialClientTrainer):
             self.cache.append(pack)
             total_bytes_communication += bytes_communication
         return total_bytes_communication
+
     def local_process_with_freeze_2(self, payload, id_list, update_name_list_list):
         """
         client允许使用不同的freeze/update序列
@@ -198,13 +209,16 @@ class SGDSerialClientTrainer(SerialClientTrainer):
         """
         model_parameters = payload[0]
         index = 0
+        all_client_samples = {}
         for id in (progress_bar := tqdm(id_list)):
             progress_bar.set_description(f"Training on client {id}", refresh=True)
             data_loader = self.dataset.get_dataloader(id, self.batch_size)
             update_name_list = update_name_list_list[index]
             index += 1
             pack = self.train_with_freeze(model_parameters, data_loader, update_name_list)
+            all_client_samples[id] = len(data_loader.dataset) * self.epochs
             self.cache.append(pack)
+        return all_client_samples
 
     def train(self, model_parameters, train_loader):
         """Single round of local training for one client.

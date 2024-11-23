@@ -1,12 +1,17 @@
+import copy
 import os.path
+import random
+
 from fedlab.contrib.algorithm.basic_server import SyncServerHandler
 from fedlab.contrib.algorithm.basic_client import SGDSerialClientTrainer
 from fedlab.core.standalone import StandalonePipeline
 from fedlab.contrib.dataset.partitioned_cifar import PartitionCIFAR
-from fedlab.models.CommModels import create_model_full
-from fedlab.utils.utils import set_seed, parse_args, load_default_transform
+from fedlab.models.CommModels import create_model_full, model_density_per_layer
+from fedlab.utils.utils import set_seed, parse_args, load_default_transform, load_input_tensor_type
 from fedlab.utils.WandbWrapper import wandbInit, wandbFinishWrap
 import fedlab.utils.simulate_time
+from fedlab.utils.System_conf import set_cur_system_hetero, get_cur_system_hetero
+
 def wandb_config(args):
     return {
         "lr": args.lr,
@@ -20,12 +25,16 @@ def wandb_config(args):
         "total_clients": args.total_clients,
         "step_size": args.step_size,
         "gamma": args.gamma,
+        "system_hetero" : args.system_hetero
+
     }
 
 set_seed()
 args = parse_args()
 config = wandb_config(args)
-wandbInit(args, "FedAvg_3", config)
+set_cur_system_hetero(args.system_hetero)
+print("当前system_hetero : ", args.system_hetero)
+# wandbInit(args, "FedAvg_Time_1", config)
 model = create_model_full(args.model_type, (args.class_num, args.pretrained))
 handler = SyncServerHandler(
     model=model, global_round=args.round, num_clients=args.total_clients, sample_ratio=args.sample_ratio, device=args.device, cuda=True
@@ -53,5 +62,13 @@ handler.num_clients = args.total_clients
 handler.setup_dataset(dataset)
 # main
 pipeline = StandalonePipeline(handler, trainer)
-pipeline.main(save=True)
+pipeline.set_clients_properties('ExpConfig/vehicle_device_capacity', args.total_clients)
+# for _ in range(10):
+#     print(pipeline.clientPropertyManager.client_profiles[random.randint(0, len(pipeline.clientPropertyManager.client_profiles) - 1)])
+
+# 获取model的density
+input_tensor_shape = load_input_tensor_type(args.dataset_type)
+# macs, params = model_density_per_layer(copy.deepcopy(model), input_tensor_shape)
+macs, params = model_density_per_layer(copy.deepcopy(model), (3, 224, 224))
+pipeline.main(save=True, model_density=macs * 3)
 wandbFinishWrap()

@@ -5,28 +5,41 @@ import os
 
 from fedlab.models.CommModels import create_model_full
 from fedlab.utils.utils import set_seed, parse_args, load_default_transform
-# transf = load_default_transform("cifar100")
+transf = load_default_transform("cifar100")
+dataset = PartitionCIFAR(
+    root="/data/zhongxiangwei/data/CIFAR100",
+    path=os.path.join("/data/zhongxiangwei/data/CIFAR100", "fedlab"),
+    dataname="cifar100",
+    num_clients=100,
+    partition='dirichlet',
+    dir_alpha=0.5,
+    seed=1234,
+    transform=transf,
+    preprocess=True
+)
+
+
+# transf = load_default_transform("cifar10")
 # dataset = PartitionCIFAR(
-#     root="/data/zhongxiangwei/data/CIFAR100",
-#     path=os.path.join("/data/zhongxiangwei/data/CIFAR100", "fedlab"),
-#     dataname="cifar100",
-#     num_clients=50,
+#     root="/data/zhongxiangwei/data/CIFAR10",
+#     path=os.path.join("/data/zhongxiangwei/data/CIFAR10", "fedlab-iid"),
+#     dataname="cifar10",
+#     num_clients=100,
 #     partition='dirichlet',
 #     dir_alpha=0.5,
 #     seed=1234,
 #     transform=transf,
 #     preprocess=True
 # )
-
+# dataset.preprocess()
 
 # transf = load_default_transform("cifar10")
 # dataset = PartitionCIFAR(
 #     root="/data/zhongxiangwei/data/CIFAR10",
-#     path=os.path.join("/data/zhongxiangwei/data/CIFAR10", "fedlab"),
+#     path=os.path.join("/data/zhongxiangwei/data/CIFAR10", "fedlab-iid"),
 #     dataname="cifar10",
 #     num_clients=100,
-#     partition='dirichlet',
-#     dir_alpha=0.5,
+#     partition='iid',
 #     seed=1234,
 #     transform=transf,
 #     preprocess=True

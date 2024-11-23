@@ -12,7 +12,7 @@ import wandb
 import yaml
 from fsspec.registry import default
 from torch.utils.tensorboard import SummaryWriter
-from typing import List
+from typing import List, Tuple
 # from Common.ClientProperties import ClientPropertyManager
 from torchvision import transforms
 from fedlab.utils.WandbWrapper import wandbFinishWrap
@@ -38,7 +38,7 @@ def parse_args():
     parser.add_argument('--weight_decay', type=float, default=0.0)
     parser.add_argument('--data_path', type=str, required=True)
     parser.add_argument('--use_cuda', action="store_false", default=True)
-    parser.add_argument('--expname', type=str, required=True)
+    parser.add_argument('--expname', type=str, required=False)
     parser.add_argument('--sample_ratio', type=float, default=1.0)
     parser.add_argument('--sys_conf_path', type=str, default='ExpConfig/System_conf.yml')
     # 指定一个同步轮训练中多少比例的clients能完成训练
@@ -46,9 +46,9 @@ def parse_args():
     parser.add_argument('--device', type=str, default='cuda:0')
     parser.add_argument('--pretrained', action='store_true', default=False, help='提供该参数，则表示开启预训练')
     # freeze方法
-    parser.add_argument('--update_method', type=str, choices=['static', 'pd_sc', 'random_sync'])
+    parser.add_argument('--update_method', type=str, choices=['static', 'pd_sc', 'random_sync', 'selective'])
     # 如果是static
-    parser.add_argument('--num_bk', type=int, help='how many blocks to update')
+    parser.add_argument('--num_bk', type=int, default=-1, help='how many blocks to update')
     # 如果是pd_sc, progressive decreasing, same for all clients, see paper: AutoFreeze: Automatically Freezing Model Blocks to Accelerate Fine-tuning
     parser.add_argument('--percentile', type=int, default=50, help='free the first tensor whose gradients rate of change is less that the percentile of all')
     parser.add_argument('--pd_sc_step', type=int, help='how many step to make decision')
@@ -63,6 +63,8 @@ def parse_args():
     parser.add_argument('--bits', type=int, default=32)
     # 如果使用top-k
     parser.add_argument('--k_ratio', type=float, default=1.0)
+
+    parser.add_argument('--system_hetero', type=str, default='practical', required=True)
     return parser.parse_args()
 
 def get_client_logger(args, rank):
@@ -181,7 +183,8 @@ def load_default_transform(dataset_type, train=False):
         if train:
             dataset_transform = transforms.Compose([
                 transforms.RandomHorizontalFlip(),
-                transforms.RandomCrop(32, 4),
+                # transforms.RandomCrop(32, 4),
+                transforms.RandomCrop(224, 4),
                 transforms.ToTensor(),
                 normalize
             ])
@@ -197,7 +200,8 @@ def load_default_transform(dataset_type, train=False):
                                          (0.2673342858792401, 0.2564384629170883, 0.27615047132568404))
         if train:
             dataset_transform = transforms.Compose([
-                transforms.RandomCrop(32, 4),
+                # transforms.RandomCrop(32, 4),
+                transforms.RandomCrop(224, 4),
                 transforms.RandomHorizontalFlip(),
                 transforms.RandomRotation(15),
                 transforms.ToTensor(),
@@ -212,3 +216,9 @@ def load_default_transform(dataset_type, train=False):
         raise NotImplementedError
 
     return dataset_transform
+
+def load_input_tensor_type(dataset_type) -> Tuple[int, int, int]:
+    if dataset_type == 'cifar10':
+        return 3, 32, 32
+    else:
+        raise NotImplementedError

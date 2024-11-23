@@ -1,37 +1,15 @@
-import matplotlib.pyplot as plt
-
-# 示例字典，每个键对应两个值
-data = {
-    'A': (10, 20),
-    'B': (15, 25),
-    'C': (20, 30),
-    'D': (25, 35),
-    'E': (30, 40)
-}
-
-# 提取键和值
-keys = list(data.keys())
-values1 = [data[key][0] for key in keys]
-values2 = [data[key][1] for key in keys]
-
-# 设置柱状图的位置
-x = range(len(keys))
-bar_width = 0.35
-
-# 创建柱状图
-plt.bar(x, values1, width=bar_width, color='skyblue', label='Value 1')
-plt.bar([i + bar_width for i in x], values2, width=bar_width, color='orange', label='Value 2')
-
-# 设置横坐标标签
-plt.xticks([i + bar_width / 2 for i in x], keys)
-
-# 添加标题和标签
-plt.title('双柱状图示例')
-plt.xlabel('类别')
-plt.ylabel('值')
-
-# 添加图例
-plt.legend()
-
-# 显示图形
-plt.show()
+import os
+from collections import Counter
+import torch
+# for cid in range(100):
+#     dataset = torch.load(os.path.join('/data/zhongxiangwei/data/CIFAR10/fedlab-iid', 'train', "data{}.pkl".format(cid)))
+#     count = Counter(dataset.targets)
+#     count = sorted(count.items(), key=lambda item: item[0])
+#     print(len(dataset))
+#     print(count)
+from fedlab.models.CommModels import model_density_per_layer
+import copy
+from fedlab.models.CommModels import create_model_full, model_density_per_layer
+model = create_model_full('resnet34', (10, True))
+macs, params = model_density_per_layer(copy.deepcopy(model), (3, 224, 224))
+print(macs, params)

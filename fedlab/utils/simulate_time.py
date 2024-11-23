@@ -10,3 +10,8 @@ initialize_once()
 
 def get_cur_time():
     return cur_time
+
+def add_cur_time(interval):
+    global cur_time
+    cur_time += interval
+    return cur_time

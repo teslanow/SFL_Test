@@ -41,6 +41,7 @@ for idx, cur_round in enumerate(range(1, 51, 5)):
                     avg_grad = pickle.load(f)
                     client_avg_grad[client_id] = avg_grad
     for name, param in total_avg_grad.items():
+        print(f"param name : {name}")
         avg_grad = param
         avg_grad = avg_grad.to(device)
         name_norm = {}
@@ -50,20 +51,26 @@ for idx, cur_round in enumerate(range(1, 51, 5)):
             if name in client_all_grad:
                 client_grad = client_all_grad[name]
                 client_grad = client_grad.to(device)
+                ag2 = avg_grad ** 2
+                dfg2 = (avg_grad - client_grad) ** 2
+                larger = torch.sum(torch.gt(ag2, dfg2)).item()
+                lesser = client_grad.numel() - larger
+                print(f"client_id : {client_id}, num diff large than over: {lesser}, otherwise: {larger}")
+
                 # 计算2-norm
-                name_dot[client_id] = (avg_grad - client_grad).norm(2).item()
+                # name_dot[client_id] = (avg_grad - client_grad).norm(2).item()
                 # name_dot[client_id] = torch.dot(avg_grad, client_grad).item()
-                name_norm[client_id] = (avg_grad.norm(2)).item()
+                # name_norm[client_id] = (avg_grad.norm(2)).item()
         # name_norm['all'] = avg_grad.norm(2).item()
         # name_dot['all'] = avg_grad.norm(2).item()
-        x, y1, y2 = [], [], []
-        for key, val in name_norm.items():
-            x.append(str(key))
-            y1.append(name_norm[key])
-            y2.append(name_dot[key])
-        plot_bar_2(x, y1, y2, f'round-{cur_round}-name-{name}', 'term 3', 'term 4')
+        # x, y1, y2 = [], [], []
+        # for key, val in name_norm.items():
+        #     x.append(str(key))
+        #     y1.append(name_norm[key])
+        #     y2.append(name_dot[key])
+        # plot_bar_2(x, y1, y2, f'round-{cur_round}-name-{name}', 'term 3', 'term 4')
         # plot_bar(x, y1, f'round-{cur_round}-name-{name}')
         # exit()
-    if idx == 1:
-        break
+    # if idx == 1:
+    #     break
 
